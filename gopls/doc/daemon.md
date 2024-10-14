@@ -1,4 +1,4 @@
-# Running gopls as a daemon
+# Gopls: Running as a daemon
 
 **Note: this feature is new. If you encounter bugs, please [file an
 issue](troubleshooting.md#file-an-issue).**
@@ -174,8 +174,9 @@ when starting the daemon. As of writing, we expose the following configuration:
 * `-remote.logfile`: the location of the daemon logfile
 * `-remote.debug`: the daemon's debug address
 * `-remote.listen.timeout`: the amount of time the daemon should wait for new
-  connections while there are no current connections, before shutting down. If
-  `0`, listen indefinitely.
+  connections while there are no current connections, before shutting down.
+  Must be set to a valid `time.Duration` (e.g. `30s` or `5m`). If `0`, listen
+  indefinitely. Default: `1m`.
 
 Note that once the daemon is already running, setting these flags will not
 change its configuration. These flags only matter for the forwarder process

@@ -10,7 +10,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
-	"io/ioutil"
+	"os"
 	"unicode"
 )
 
@@ -35,8 +35,10 @@ var files = []string{
 	"dirlist.html",
 	"error.html",
 	"example.html",
+	"favicon.ico",
 	"godoc.html",
 	"godocs.js",
+	"gopher/pkg.png",
 	"images/minus.gif",
 	"images/plus.gif",
 	"images/treeview-black-line.gif",
@@ -69,7 +71,7 @@ func Generate() ([]byte, error) {
 	fmt.Fprintf(buf, "%v\n\n%v\n\npackage static\n\n", license, warning)
 	fmt.Fprintf(buf, "var Files = map[string]string{\n")
 	for _, fn := range files {
-		b, err := ioutil.ReadFile(fn)
+		b, err := os.ReadFile(fn)
 		if err != nil {
 			return b, err
 		}

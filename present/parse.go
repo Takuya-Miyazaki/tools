@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -342,9 +342,9 @@ func (ctx *Context) Parse(r io.Reader, name string, mode ParseMode) (*Doc, error
 }
 
 // Parse parses a document from r. Parse reads assets used by the presentation
-// from the file system using ioutil.ReadFile.
+// from the file system using os.ReadFile.
 func Parse(r io.Reader, name string, mode ParseMode) (*Doc, error) {
-	ctx := Context{ReadFile: ioutil.ReadFile}
+	ctx := Context{ReadFile: os.ReadFile}
 	return ctx.Parse(r, name, mode)
 }
 
@@ -525,6 +525,7 @@ func parseSections(ctx *Context, name, prefix string, lines *Lines, number []int
 					// Command breaks text block.
 					// Section heading breaks text block in markdown.
 					if text[0] == '.' || isSpeakerNote(text) {
+						lines.back()
 						break
 					}
 					if strings.HasPrefix(text, `\.`) { // Backslash escapes initial period.

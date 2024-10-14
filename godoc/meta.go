@@ -26,12 +26,15 @@ var (
 // ----------------------------------------------------------------------------
 // Documentation Metadata
 
-// TODO(adg): why are some exported and some aren't? -brad
 type Metadata struct {
+	// These fields can be set in the JSON header at the top of a doc.
 	Title    string
 	Subtitle string
-	Template bool   // execute as template
-	Path     string // canonical path for this page
+	Template bool     // execute as template
+	Path     string   // canonical path for this page
+	AltPaths []string // redirect these other paths to this page
+
+	// These are internal to the implementation.
 	filePath string // filesystem path relative to goroot
 }
 
@@ -40,7 +43,6 @@ func (m *Metadata) FilePath() string { return m.filePath }
 // extractMetadata extracts the Metadata from a byte slice.
 // It returns the Metadata value and the remaining data.
 // If no metadata is present the original byte slice is returned.
-//
 func extractMetadata(b []byte) (meta Metadata, tail []byte, err error) {
 	tail = b
 	if !bytes.HasPrefix(b, jsonStart) {
@@ -58,7 +60,7 @@ func extractMetadata(b []byte) (meta Metadata, tail []byte, err error) {
 	return
 }
 
-// UpdateMetadata scans $GOROOT/doc for HTML files, reads their metadata,
+// updateMetadata scans $GOROOT/doc for HTML and Markdown files, reads their metadata,
 // and updates the DocMetadata map.
 func (c *Corpus) updateMetadata() {
 	metadata := make(map[string]*Metadata)
@@ -79,7 +81,7 @@ func (c *Corpus) updateMetadata() {
 				scan(name) // recurse
 				continue
 			}
-			if !strings.HasSuffix(name, ".html") {
+			if !strings.HasSuffix(name, ".html") && !strings.HasSuffix(name, ".md") {
 				continue
 			}
 			// Extract metadata from the file.
@@ -93,15 +95,23 @@ func (c *Corpus) updateMetadata() {
 				log.Printf("updateMetadata: %s: %v", name, err)
 				continue
 			}
+			// Present all .md as if they were .html,
+			// so that it doesn't matter which one a page is written in.
+			if strings.HasSuffix(name, ".md") {
+				name = strings.TrimSuffix(name, ".md") + ".html"
+			}
 			// Store relative filesystem path in Metadata.
 			meta.filePath = name
 			if meta.Path == "" {
-				// If no Path, canonical path is actual path.
-				meta.Path = meta.filePath
+				// If no Path, canonical path is actual path with .html removed.
+				meta.Path = strings.TrimSuffix(name, ".html")
 			}
 			// Store under both paths.
 			metadata[meta.Path] = &meta
 			metadata[meta.filePath] = &meta
+			for _, path := range meta.AltPaths {
+				metadata[path] = &meta
+			}
 		}
 	}
 	scan("/doc")
@@ -110,7 +120,6 @@ func (c *Corpus) updateMetadata() {
 
 // MetadataFor returns the *Metadata for a given relative path or nil if none
 // exists.
-//
 func (c *Corpus) MetadataFor(relpath string) *Metadata {
 	if m, _ := c.docMetadata.Get(); m != nil {
 		meta := m.(map[string]*Metadata)
@@ -131,7 +140,6 @@ func (c *Corpus) MetadataFor(relpath string) *Metadata {
 
 // refreshMetadata sends a signal to update DocMetadata. If a refresh is in
 // progress the metadata will be refreshed again afterward.
-//
 func (c *Corpus) refreshMetadata() {
 	select {
 	case c.refreshMetadataSignal <- true:
@@ -139,7 +147,7 @@ func (c *Corpus) refreshMetadata() {
 	}
 }
 
-// RefreshMetadataLoop runs forever, updating DocMetadata when the underlying
+// refreshMetadataLoop runs forever, updating DocMetadata when the underlying
 // file system changes. It should be launched in a goroutine.
 func (c *Corpus) refreshMetadataLoop() {
 	for {

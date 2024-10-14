@@ -1,4 +1,4 @@
-# Vim / Neovim
+# Gopls: Using Vim or Neovim
 
 * [vim-go](#vimgo)
 * [LanguageClient-neovim](#lcneovim)
@@ -91,9 +91,9 @@ Use [coc.nvim], with the following `coc-settings.json` configuration:
 
 ```json
   "languageserver": {
-    "golang": {
+    "go": {
       "command": "gopls",
-      "rootPatterns": ["go.mod", ".vim/", ".git/", ".hg/"],
+      "rootPatterns": ["go.work", "go.mod", ".vim/", ".git/", ".hg/"],
       "filetypes": ["go"],
       "initializationOptions": {
         "usePlaceholders": true
@@ -101,6 +101,13 @@ Use [coc.nvim], with the following `coc-settings.json` configuration:
     }
   }
 ```
+
+If you use `go.work` files, you may want to set the
+`workspace.workspaceFolderCheckCwd` option. This will force coc.nvim to search
+parent directories for `go.work` files, even if the current open directory has
+a `go.mod` file. See the
+[coc.nvim documentation](https://github.com/neoclide/coc.nvim/wiki/Using-workspaceFolders)
+for more details.
 
 Other [settings](settings.md) can be added in `initializationOptions` too.
 
@@ -116,8 +123,8 @@ In vim classic only, use the experimental [`govim`], simply follow the [install 
 
 ## <a href="#neovim" id="neovim">Neovim v0.5.0+</a>
 
-To use the new (still experimental) native LSP client in Neovim, make sure you
-[install][nvim-install] the prerelease v0.5.0 version of Neovim (aka “nightly”),
+To use the new native LSP client in Neovim, make sure you
+[install][nvim-install] Neovim v.0.5.0+,
 the `nvim-lspconfig` configuration helper plugin, and check the
 [`gopls` configuration section][nvim-lspconfig] there.
 
@@ -133,70 +140,78 @@ cd "$dir"
 git clone 'https://github.com/neovim/nvim-lspconfig.git' .
 ```
 
-### <a href="#neovim-config" id="neovim-config">Custom Configuration</a>
+### <a href="#neovim-config" id="neovim-config">Configuration</a>
 
-You can add custom configuration using Lua.  Here is an example of enabling the
-`unusedparams` check as well as `staticcheck`:
+nvim-lspconfig aims to provide reasonable defaults, so your setup can be very
+brief.
 
-```vim
-lua <<EOF
-  lspconfig = require "lspconfig"
-  lspconfig.gopls.setup {
-    cmd = {"gopls", "serve"},
-    settings = {
-      gopls = {
-        analyses = {
-          unusedparams = true,
-        },
-        staticcheck = true,
-      },
-    },
-  }
-EOF
+```lua
+local lspconfig = require("lspconfig")
+lspconfig.gopls.setup({})
 ```
 
-### <a href="#neovim-imports" id="neovim-imports">Imports</a>
+However, you can also configure `gopls` for your preferences. Here's an
+example that enables `unusedparams`, `staticcheck`, and `gofumpt`.
 
-To get your imports ordered on save, like `goimports` does, you can define
-a helper function in Lua:
+```lua
+local lspconfig = require("lspconfig")
+lspconfig.gopls.setup({
+  settings = {
+    gopls = {
+      analyses = {
+        unusedparams = true,
+      },
+      staticcheck = true,
+      gofumpt = true,
+    },
+  },
+})
+```
 
-```vim
-lua <<EOF
-  -- …
+### <a href="#neovim-imports" id="neovim-imports">Imports and Formatting</a>
 
-  function goimports(timeoutms)
-    local context = { source = { organizeImports = true } }
-    vim.validate { context = { context, "t", true } }
+Use the following configuration to have your imports organized on save using
+the logic of `goimports` and your code formatted.
 
+```lua
+autocmd("BufWritePre", {
+  pattern = "*.go",
+  callback = function()
     local params = vim.lsp.util.make_range_params()
-    params.context = context
-
-    local method = "textDocument/codeAction"
-    local resp = vim.lsp.buf_request_sync(0, method, params, timeoutms)
-    if resp and resp[1] then
-      local result = resp[1].result
-      if result and result[1] then
-        local edit = result[1].edit
-        vim.lsp.util.apply_workspace_edit(edit)
+    params.context = {only = {"source.organizeImports"}}
+    -- buf_request_sync defaults to a 1000ms timeout. Depending on your
+    -- machine and codebase, you may want longer. Add an additional
+    -- argument after params if you find that you have to write the file
+    -- twice for changes to be saved.
+    -- E.g., vim.lsp.buf_request_sync(0, "textDocument/codeAction", params, 3000)
+    local result = vim.lsp.buf_request_sync(0, "textDocument/codeAction", params)
+    for cid, res in pairs(result or {}) do
+      for _, r in pairs(res.result or {}) do
+        if r.edit then
+          local enc = (vim.lsp.get_client_by_id(cid) or {}).offset_encoding or "utf-16"
+          vim.lsp.util.apply_workspace_edit(r.edit, enc)
+        end
       end
     end
-
-    vim.lsp.buf.formatting()
+    vim.lsp.buf.format({async = false})
   end
-EOF
-
-autocmd BufWritePre *.go lua goimports(1000)
+})
 ```
-
-(Taken from the [discussion][nvim-lspconfig-imports] on Neovim issue tracker.)
 
 ### <a href="#neovim-omnifunc" id="neovim-omnifunc">Omnifunc</a>
 
-To make your <kbd>Ctrl</kbd>+<kbd>x</kbd>,<kbd>Ctrl</kbd>+<kbd>o</kbd> work, add
-this to your `init.vim`:
+In Neovim v0.8.1 and later if you don't set the option `omnifunc`, it will auto
+set to `v:lua.vim.lsp.omnifunc`. If you are using an earlier version, you can
+configure it manually:
 
-```vim
-autocmd FileType go setlocal omnifunc=v:lua.vim.lsp.omnifunc
+```lua
+local on_attach = function(client, bufnr)
+  -- Enable completion triggered by <c-x><c-o>
+  vim.api.nvim_buf_set_option(bufnr, 'omnifunc', 'v:lua.vim.lsp.omnifunc')
+end
+require('lspconfig').gopls.setup({
+   on_attach = on_attach
+})
 ```
 
 ### <a href="#neovim-links" id="neovim-links">Additional Links</a>
@@ -215,5 +230,5 @@ autocmd FileType go setlocal omnifunc=v:lua.vim.lsp.omnifunc
 [govim-install]: https://github.com/myitcv/govim/blob/master/README.md#govim---go-development-plugin-for-vim8
 [nvim-docs]: https://neovim.io/doc/user/lsp.html
 [nvim-install]: https://github.com/neovim/neovim/wiki/Installing-Neovim
-[nvim-lspconfig]: https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#gopls
+[nvim-lspconfig]: https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md#gopls
 [nvim-lspconfig-imports]: https://github.com/neovim/nvim-lspconfig/issues/115

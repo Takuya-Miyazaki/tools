@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build ignore
 // +build ignore
 
 // Command makestatic writes the generated file buffer to "static.go".
@@ -10,7 +11,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	"golang.org/x/tools/godoc/static"
@@ -28,7 +28,7 @@ func makestatic() error {
 	if err != nil {
 		return fmt.Errorf("error while generating static.go: %v\n", err)
 	}
-	err = ioutil.WriteFile("static.go", buf, 0666)
+	err = os.WriteFile("static.go", buf, 0666)
 	if err != nil {
 		return fmt.Errorf("error while writing static.go: %v\n", err)
 	}

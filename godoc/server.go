@@ -16,7 +16,6 @@ import (
 	htmlpkg "html"
 	htmltemplate "html/template"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -54,7 +53,6 @@ func (s *handlerServer) registerWithMux(mux *http.ServeMux) {
 // directory, PageInfo.PAst and PageInfo.PDoc are nil. If there are no sub-
 // directories, PageInfo.Dirs is nil. If an error occurred, PageInfo.Err is
 // set to the respective error but the error is not logged.
-//
 func (h *handlerServer) GetPageInfo(abspath, relpath string, mode PageInfoMode, goos, goarch string) *PageInfo {
 	info := &PageInfo{Dirname: abspath, Mode: mode}
 
@@ -85,7 +83,7 @@ func (h *handlerServer) GetPageInfo(abspath, relpath string, mode PageInfoMode, 
 		if err != nil {
 			return nil, err
 		}
-		return ioutil.NopCloser(bytes.NewReader(data)), nil
+		return io.NopCloser(bytes.NewReader(data)), nil
 	}
 
 	// Make the syscall/js package always visible by default.
@@ -328,7 +326,6 @@ func (h *handlerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		info.TypeInfoIndex[ti.Name] = i
 	}
 
-	info.GoogleCN = googleCN(r)
 	var body []byte
 	if info.Dirname == "/src" {
 		body = applyTemplate(h.p.PackageRootHTML, "packageRootHTML", info)
@@ -340,7 +337,6 @@ func (h *handlerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Tabtitle: tabtitle,
 		Subtitle: subtitle,
 		Body:     body,
-		GoogleCN: info.GoogleCN,
 		TreeView: hasTreeView,
 	})
 }
@@ -412,7 +408,6 @@ func (p *Presentation) GetPageInfoMode(r *http.Request) PageInfoMode {
 // (as is the convention for packages). This is sufficient
 // to resolve package identifiers without doing an actual
 // import. It never returns an error.
-//
 func poorMansImporter(imports map[string]*ast.Object, path string) (*ast.Object, error) {
 	pkg := imports[path]
 	if pkg == nil {
@@ -464,12 +459,19 @@ func addNames(names map[string]bool, decl ast.Decl) {
 	case *ast.FuncDecl:
 		name := d.Name.Name
 		if d.Recv != nil {
+			r := d.Recv.List[0].Type
+			if rr, isstar := r.(*ast.StarExpr); isstar {
+				r = rr.X
+			}
+
 			var typeName string
-			switch r := d.Recv.List[0].Type.(type) {
-			case *ast.StarExpr:
-				typeName = r.X.(*ast.Ident).Name
+			switch x := r.(type) {
 			case *ast.Ident:
-				typeName = r.Name
+				typeName = x.Name
+			case *ast.IndexExpr:
+				typeName = x.X.(*ast.Ident).Name
+			case *ast.IndexListExpr:
+				typeName = x.X.(*ast.Ident).Name
 			}
 			name = typeName + "_" + name
 		}
@@ -492,7 +494,6 @@ func addNames(names map[string]bool, decl ast.Decl) {
 // which correctly updates each package file's comment list.
 // (The ast.PackageExports signature is frozen, hence the local
 // implementation).
-//
 func packageExports(fset *token.FileSet, pkg *ast.Package) {
 	for _, src := range pkg.Files {
 		cmap := ast.NewCommentMap(fset, src, src.Comments)
@@ -610,13 +611,11 @@ func (p *Presentation) serveTextFile(w http.ResponseWriter, r *http.Request, abs
 		SrcPath:  relpath,
 		Tabtitle: relpath,
 		Body:     buf.Bytes(),
-		GoogleCN: googleCN(r),
 	})
 }
 
 // formatGoSource HTML-escapes Go source text and writes it to w,
 // decorating it with the specified analysis links.
-//
 func formatGoSource(buf *bytes.Buffer, text []byte, links []analysis.Link, pattern string, selection Selection) {
 	// Emit to a temp buffer so that we can add line anchors at the end.
 	saved, buf := buf, new(bytes.Buffer)
@@ -689,13 +688,20 @@ func (p *Presentation) serveDirectory(w http.ResponseWriter, r *http.Request, ab
 		SrcPath:  relpath,
 		Tabtitle: relpath,
 		Body:     applyTemplate(p.DirlistHTML, "dirlistHTML", list),
-		GoogleCN: googleCN(r),
 	})
 }
 
 func (p *Presentation) ServeHTMLDoc(w http.ResponseWriter, r *http.Request, abspath, relpath string) {
 	// get HTML body contents
+	isMarkdown := false
 	src, err := vfs.ReadFile(p.Corpus.fs, abspath)
+	if err != nil && strings.HasSuffix(abspath, ".html") {
+		if md, errMD := vfs.ReadFile(p.Corpus.fs, strings.TrimSuffix(abspath, ".html")+".md"); errMD == nil {
+			src = md
+			isMarkdown = true
+			err = nil
+		}
+	}
 	if err != nil {
 		log.Printf("ReadFile: %s", err)
 		p.ServeError(w, r, relpath, err)
@@ -718,7 +724,6 @@ func (p *Presentation) ServeHTMLDoc(w http.ResponseWriter, r *http.Request, absp
 	page := Page{
 		Title:    meta.Title,
 		Subtitle: meta.Subtitle,
-		GoogleCN: googleCN(r),
 	}
 
 	// evaluate as template if indicated
@@ -736,6 +741,18 @@ func (p *Presentation) ServeHTMLDoc(w http.ResponseWriter, r *http.Request, absp
 			return
 		}
 		src = buf.Bytes()
+	}
+
+	// Apply markdown as indicated.
+	// (Note template applies before Markdown.)
+	if isMarkdown {
+		html, err := renderMarkdown(src)
+		if err != nil {
+			log.Printf("executing markdown %s: %v", relpath, err)
+			p.ServeError(w, r, relpath, err)
+			return
+		}
+		src = html
 	}
 
 	// if it's the language spec, add tags to EBNF productions
@@ -797,7 +814,8 @@ func (p *Presentation) serveFile(w http.ResponseWriter, r *http.Request) {
 		if redirect(w, r) {
 			return
 		}
-		if index := pathpkg.Join(abspath, "index.html"); util.IsTextFile(p.Corpus.fs, index) {
+		index := pathpkg.Join(abspath, "index.html")
+		if util.IsTextFile(p.Corpus.fs, index) || util.IsTextFile(p.Corpus.fs, pathpkg.Join(abspath, "index.md")) {
 			p.ServeHTMLDoc(w, r, index, index)
 			return
 		}

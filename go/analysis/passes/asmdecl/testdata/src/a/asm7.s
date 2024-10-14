@@ -190,3 +190,17 @@ TEXT ·returnnamed(SB),0,$0-41
 
 TEXT ·returnintmissing(SB),0,$0-8
 	RET // want `RET without writing to 8-byte ret\+0\(FP\)`
+
+// writing to result in ABIInternal function
+TEXT ·returnABIInternal<ABIInternal>(SB), NOSPLIT, $8
+	MOVD	$123, R3
+	RET
+TEXT ·returnmissingABIInternal<ABIInternal>(SB), NOSPLIT, $8
+	MOVD	$123, R10
+	RET // want `RET without writing to result register`
+
+// issue 69352
+TEXT ·returnsyscall<ABIInternal>(SB),0,$0-0
+	MOVD	$123, R10
+	SYSCALL
+	RET

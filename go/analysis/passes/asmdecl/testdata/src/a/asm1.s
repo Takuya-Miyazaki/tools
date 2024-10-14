@@ -307,7 +307,6 @@ TEXT ·returnnamed(SB),0,$0-41
 TEXT ·returnintmissing(SB),0,$0-8
 	RET // want `RET without writing to 8-byte ret\+0\(FP\)`
 
-
 // issue 15271
 TEXT ·f15271(SB), NOSPLIT, $0-4
     // Stick 123 into the low 32 bits of X0.
@@ -344,6 +343,20 @@ TEXT ·pickInternalABI<ABIInternal>(SB), NOSPLIT, $32
 // ABI selector
 TEXT ·pickFutureABI<ABISomethingNotyetInvented>(SB), NOSPLIT, $32
 	MOVQ	x+0(FP), AX
+	RET
+
+// writing to result in ABIInternal function
+TEXT ·returnABIInternal<ABIInternal>(SB), NOSPLIT, $32
+	MOVQ	$123, AX
+	RET
+TEXT ·returnmissingABIInternal<ABIInternal>(SB), NOSPLIT, $32
+	MOVQ	$123, CX
+	RET // want `RET without writing to result register`
+
+// issue 69352
+TEXT ·returnsyscall<ABIInternal>(SB),0,$0-0
+	MOVQ	$123, CX
+	SYSCALL
 	RET
 
 // return jump
